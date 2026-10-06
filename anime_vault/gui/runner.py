@@ -15,7 +15,10 @@ import sys
 import threading
 from pathlib import Path
 
-PROJECT = Path(__file__).resolve().parents[2]
+from anime_vault import i18n
+from anime_vault.i18n import _
+from anime_vault.paths import FROZEN, PROJECT
+
 GUI_MARK = "\x1e"
 ANSI_RE = re.compile(r"\x1b\[([0-9;]*)m")
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -48,7 +51,7 @@ def option_labels(prompt: str, options: str) -> list[tuple[str, str]]:
     labels = []
     for letter in options:
         match = re.search(rf"(?:^|[\s,(]){re.escape(letter)}\s*[—-]\s*([^,;)\]]+)", prompt)
-        text = match.group(1).strip() if match else WORDS.get(letter, letter.upper())
+        text = match.group(1).strip() if match else _(WORDS[letter]) if letter in WORDS else letter.upper()
         labels.append((letter, text[:1].upper() + text[1:]))
     return labels
 
@@ -68,11 +71,13 @@ class Runner:
 
     def start(self, title: str, command: str, root: Path) -> None:
         if self.busy:
-            raise RuntimeError("уже идёт другая команда")
+            raise RuntimeError(_("уже идёт другая команда"))
         self.title = title
-        env = dict(os.environ, ANIME_VAULT_GUI="1", PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1",
-                   PYTHONPATH=str(PROJECT))
-        self.process = subprocess.Popen([python_exe(), "-m", "anime_vault", command, "--root", str(root)],
+        env = dict(os.environ, ANIME_VAULT_GUI="1", ANIME_VAULT_LANG=i18n.LANG, PYTHONIOENCODING="utf-8",
+                   PYTHONUNBUFFERED="1", PYTHONPATH=str(PROJECT))
+        # Собранный .exe запускает сам себя с командой (anime_vault\__main__.py), исходники — python -m anime_vault.
+        program = [sys.executable] if FROZEN else [python_exe(), "-m", "anime_vault"]
+        self.process = subprocess.Popen([*program, command, "--root", str(root)],
                                         cwd=str(PROJECT), env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                         stderr=subprocess.STDOUT, creationflags=NO_WINDOW)
         threading.Thread(target=self.read, args=(self.process,), daemon=True).start()
