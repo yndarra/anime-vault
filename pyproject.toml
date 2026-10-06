@@ -1,0 +1,21 @@
+[project]
+name = "anime-vault"
+version = "1.0.0"
+description = "Downloads new pins from private Pinterest boards and distributes them into fixed-size batches for anime-sort, with a CustomTkinter GUI"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+
+[tool.ruff]
+line-length = 140
+target-version = "py312"
+extend-exclude = ["venv"]
+
+[tool.ruff.lint]
+# Pyflakes + pycodestyle errors; the code favours long Russian docstrings, so line length is relaxed.
+select = ["E", "F", "W"]
+ignore = ["E402", "E501", "E731", "E741"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

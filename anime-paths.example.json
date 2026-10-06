@@ -1,0 +1,14 @@
+{
+  "//": "Пути коллекции (относительно этой папки, с прямыми слэшами /) и пути к проектам; читают anime-vault и anime-sort. Настройки скачивания (Pinterest, размер пачки) — в config.json проекта anime-vault",
+  "project": "C:/Users/<you>/dev/python/anime-vault",
+  "anime_sort": "C:/Users/<you>/dev/python/anime-sort",
+  "//folders": "batches — папки dataN для anime-sort; results — обработанные наборы test-dataN; waifu — итог сортировки",
+  "batches": "dataN",
+  "results": "test-dataN",
+  "waifu": "Waifu",
+  "//sources": "Откуда distribute переносит новое в dataN (доски «только хранить» из config.json сюда не входят)",
+  "sources": [
+    "data/Anime JSON Pinterest/data/01. An i me",
+    "data/Anime ADD/processed_data"
+  ]
+}
