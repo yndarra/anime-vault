@@ -1,0 +1,25 @@
+name: Release
+
+# Тег v* (git tag v1.1.0 && git push origin v1.1.0) → тесты, сборка anime-vault.exe и релиз с архивом.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt -r requirements-dev.txt pyinstaller
+      - run: pytest -q
+      - run: python packaging/build.py
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" build/anime-vault-windows.zip --title "anime-vault ${{ github.ref_name }}" --generate-notes

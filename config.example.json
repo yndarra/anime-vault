@@ -1,11 +1,15 @@
 {
-  "//": "Личные настройки anime-vault (не в git; образец — config.example.json). Пути коллекции — в anime-paths.json в корне коллекции",
-  "//collection": "Папка коллекции (где лежит anime-paths.json) — для окна anime-vault; .bat-файлы находят её сами",
+  "//": "Личные настройки anime-vault (не в git; образец — config.example.json). Проще всего править в окне — страница «Настройки»",
+  "//language": "Язык окна и сообщений: ru / en (не задан — по языку Windows)",
+  "language": "ru",
+  "//collection": "Папка коллекции: туда качаются доски и там лежат пачки dataN (anime-paths.json в ней — для связки с anime-sort)",
   "collection": "C:/Users/<you>/Pictures/Anime",
+  "//distribute": "Раскладывать новое по пачкам dataN (false — только скачивание)",
+  "distribute": true,
   "//batch_size": "Сколько файлов в одной папке dataN (последняя может быть меньше)",
   "batch_size": 500,
   "pinterest": {
-    "//": "Доски качаются в target/<name>. browser_cookies — профиль браузера, где выполнен вход в Pinterest (gallery-dl --cookies-from-browser)",
+    "//": "Доски качаются в target/<name>. browser_cookies — откуда куки для входа: «opera:<папка профиля>», «firefox», «chrome» …, путь к cookies.txt или пусто (только публичные доски)",
     "user": "your-pinterest-name",
     "target": "data/Anime JSON Pinterest/data",
     "browser_cookies": "opera:C:/Users/<you>/AppData/Roaming/Opera Software/Opera GX Stable",
@@ -18,8 +22,12 @@
         "name": "02. Шедевры",
         "slug": "02-%D1%88%D0%B5%D0%B4%D0%B5%D0%B2%D1%80%D1%8B",
         "keep": true
+      },
+      {
+        "name": "frieren",
+        "url": "https://danbooru.donmai.us/posts?tags=frieren"
       }
     ],
-    "//boards": "Доски: name — папка, slug — часть адреса; keep: true — «только хранить»: доска обновляется с Pinterest, но раскладка (distribute) её не трогает"
+    "//boards": "Доски: name — папка; доска Pinterest — slug (часть адреса) и user, если она чужая; любой другой сайт gallery-dl — url. keep: true — «только хранить»: обновляется с сайта, но раскладка (distribute) её не трогает"
   }
 }
