@@ -70,7 +70,8 @@ class Card(ctk.CTkFrame):
     def __init__(self, parent, title: str = "", **options):
         super().__init__(parent, fg_color=PANEL, corner_radius=14, border_width=1, border_color=LINE, **options)
         if title:
-            ctk.CTkLabel(self, text=title.upper(), font=font(11, "bold"), text_color=MUTED).pack(anchor="w", padx=18, pady=(14, 4))
+            # Заголовки карточек — капсом, но имя папок dataN остаётся как есть.
+            ctk.CTkLabel(self, text=title.upper().replace("DATAN", "dataN"), font=font(11, "bold"), text_color=MUTED).pack(anchor="w", padx=18, pady=(14, 4))
 
 
 class Stat(Card):
