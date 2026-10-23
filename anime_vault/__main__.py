@@ -3,6 +3,7 @@ r"""python -m anime_vault [<команда>] [--root <папка коллекц�
 Команды:
     download     скачать новое с досок (config.json → pinterest.boards)
     distribute   разложить новое из источников (anime-paths.json → sources) по dataN пачками по batch_size
+    sync         синхронизировать Waifu с Google Drive в обе стороны (--yes — без вопроса, для автосинка)
     (без команды) открыть окно anime-vault
 Без --root корень ищется вверх от текущей папки (там, где лежит anime-paths.json), потом config.json → "collection".
 
@@ -38,11 +39,19 @@ def main() -> int:
     from anime_vault.gui import collection
 
     parser = argparse.ArgumentParser(prog="anime_vault")
-    parser.add_argument("command", choices=["download", "distribute"])
+    parser.add_argument("command", choices=["download", "distribute", "sync"])
     parser.add_argument("--root", type=Path, default=None, help="папка коллекции (где лежит anime-paths.json)")
+    parser.add_argument("--yes", action="store_true", help="sync: без вопроса «Синхронизировать?» (автосинк)")
     args = parser.parse_args()
 
     def command() -> int:
+        if args.command == "sync":
+            from anime_vault import drive_sync
+
+            root = args.root.resolve() if args.root else collection.find_root()
+            if root is None:
+                raise console.UserError("коллекция не найдена", "передайте --root или укажите папку в «Настройках»")
+            return drive_sync.run(root, yes=args.yes)
         if args.root:
             root = args.root.resolve()
         else:

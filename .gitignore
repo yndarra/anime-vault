@@ -10,3 +10,7 @@ logs/
 .ruff_cache/
 .claude/
 build/
+
+# Вход в Google Drive (синк Waifu)
+google-credentials.json
+google-token.json

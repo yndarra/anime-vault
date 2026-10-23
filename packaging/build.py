@@ -28,6 +28,7 @@ def main() -> int:
         "--collect-all", "customtkinter",
         "--collect-submodules", "gallery_dl",       # сайты gallery-dl подключаются по имени — сам PyInstaller их не найдёт
         "--hidden-import", "send2trash",
+        "--collect-data", "googleapiclient",        # описания API Google (discovery) — для синка с Драйвом
         "--paths", str(ROOT),
         "--distpath", str(BUILD / "dist"), "--workpath", str(BUILD / "work"), "--specpath", str(BUILD),
         str(ROOT / "packaging" / "entry.py"),

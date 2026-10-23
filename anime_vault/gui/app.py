@@ -19,13 +19,14 @@ import queue
 import subprocess
 import sys
 import threading
+import time
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
-from anime_vault import browsers, i18n, manifest
+from anime_vault import browsers, drive_sync, gdrive, i18n, manifest
 from anime_vault.gui import collection
 from anime_vault.gui.runner import Runner, python_exe
 from anime_vault.i18n import _
@@ -38,7 +39,7 @@ ACCENT, ACCENT_HOVER, TEAL, GREEN, YELLOW, RED = "#8b7cff", "#7a6af0", "#5ad1c4"
 ANSI = {"31": RED, "91": RED, "32": GREEN, "92": GREEN, "33": YELLOW, "93": YELLOW, "36": TEAL, "96": TEAL,
         "90": FAINT, "97": "#ffffff", "37": TEXT}
 PAGES = [("overview", "Обзор", "▦"), ("download", "Скачать", "⬇"), ("distribute", "Разложить", "⇢"),
-         ("duplicates", "Дубли", "⧉"), ("settings", "Настройки", "⚙")]
+         ("duplicates", "Дубли", "⧉"), ("drive", "Драйв", "☁"), ("settings", "Настройки", "⚙")]
 THUMB = 150          # сторона миниатюры на странице «Дубли»
 PAGE_SIZE = 30       # столько дублей показывается за раз («Показать ещё»)
 # Варианты входа на странице «Настройки»: ключ браузера gallery-dl, "file" — cookies.txt, "none" — без входа.
@@ -94,7 +95,9 @@ def button(parent, text: str, command, kind: str = "normal", **options) -> ctk.C
     colors = {"primary": (ACCENT, ACCENT_HOVER, "#ffffff"), "danger": ("#3a1a20", "#4a2028", "#ffb3bc"),
               "normal": (PANEL2, "#262a36", TEXT), "ghost": ("transparent", PANEL2, MUTED)}[kind]
     settings = dict(fg_color=colors[0], hover_color=colors[1], text_color=colors[2], corner_radius=10, height=36, font=font(13),
-                    border_width=0 if kind != "normal" else 1, border_color=LINE)
+                    border_width=0 if kind != "normal" else 1, border_color=LINE, text_color_disabled=FAINT)
+    if kind == "primary":
+        settings["text_color_disabled"] = "#3b3466"     # на фиолетовой кнопке бледно-серый текст не читается
     settings.update(options)   # переданное (height, width …) важнее значений по умолчанию
     return ctk.CTkButton(parent, text=text, command=command, **settings)
 
@@ -126,6 +129,7 @@ class App(ctk.CTk):
         self.refresh()
         self.after(100, self.poll)
         self.after(500, self.poll_browser)
+        self.after(15_000, self.poll_auto_sync)
 
     # ================================================================ каркас
 
@@ -172,7 +176,7 @@ class App(ctk.CTk):
         self.body.grid_rowconfigure(0, weight=1)
         self.pages = {"overview": self.page_overview(), "download": self.page_download(),
                       "distribute": self.page_distribute(), "duplicates": self.page_duplicates(),
-                      "settings": self.page_settings()}
+                      "drive": self.page_drive(), "settings": self.page_settings()}
         self.build_log(main)
 
     def build_log(self, main) -> None:
@@ -206,12 +210,15 @@ class App(ctk.CTk):
                   "download": (_("Скачать новое"), _("Доски → папки досок (gallery-dl, вход через куки браузера)")),
                   "distribute": (_("Разложить по dataN"), _("Новое из источников → папки dataN по размеру пачки, дубли — в duplicates")),
                   "duplicates": (_("Дубли"), _("Что раскладка не стала класть в dataN: такой же файл уже есть в коллекции")),
+                  "drive": (_("Google Drive"), _("Папка Waifu ⇄ Драйв в обе стороны: новое копируется, удалённое уходит в корзину")),
                   "settings": (_("Настройки"), _("config.json рядом с программой — личное, не в git"))}
         self.page_title.configure(text=titles[key][0])
         self.page_sub.configure(text=titles[key][1])
         self.current = key
         if key == "duplicates":
             self.load_duplicates()
+        if key == "drive":
+            self.refresh_drive()
 
     # ================================================================ страницы
 
@@ -317,6 +324,64 @@ class App(ctk.CTk):
         self.dup_list = ctk.CTkScrollableFrame(page, fg_color="transparent")
         self.dup_list.grid(row=1, column=0, sticky="nsew")
         self.dup_list.grid_columnconfigure(0, weight=1)
+        return page
+
+    def page_drive(self) -> ctk.CTkFrame:
+        page = ctk.CTkScrollableFrame(self.body, fg_color="transparent")
+        drive = drive_sync.settings()
+        account = Card(page, _("Аккаунт Google"))
+        account.pack(fill="x", pady=(0, 14))
+        self.drive_account = ctk.CTkLabel(account, text=_("Проверяю…"), font=font(14, "bold"), text_color=TEXT, anchor="w",
+                                          justify="left", wraplength=900)
+        self.drive_account.pack(fill="x", padx=18, pady=(2, 2))
+        self.drive_quota = ctk.CTkLabel(account, text="", font=font(12), text_color=MUTED, anchor="w", justify="left", wraplength=900)
+        self.drive_quota.pack(fill="x", padx=18)
+        row = ctk.CTkFrame(account, fg_color="transparent")
+        row.pack(fill="x", padx=18, pady=(10, 16))
+        self.drive_login = button(row, _("Войти в Google"), self.drive_sign_in, "primary", width=180)
+        self.drive_login.pack(side="left")
+        self.drive_logout = button(row, _("Выйти"), self.drive_sign_out, "ghost", width=90)
+        self.drive_logout.pack(side="left", padx=8)
+        self.drive_client = button(row, _("Файл OAuth-клиента…"), self.drive_pick_client, "ghost", width=180)
+        self.drive_client.pack(side="left")
+
+        sync = Card(page, _("Синхронизация"))
+        sync.pack(fill="x", pady=(0, 14))
+        self.drive_info = ctk.CTkLabel(sync, text="", font=font(13), text_color=TEXT, anchor="w", justify="left", wraplength=900)
+        self.drive_info.pack(fill="x", padx=18, pady=(2, 6))
+        self.drive_last = ctk.CTkLabel(sync, text="", font=font(12), text_color=MUTED, anchor="w", justify="left")
+        self.drive_last.pack(fill="x", padx=18)
+        row = ctk.CTkFrame(sync, fg_color="transparent")
+        row.pack(fill="x", padx=18, pady=(10, 16))
+        self.drive_button = button(row, "⇅  " + _("Синхронизировать"), self.start_sync, "primary", width=220, height=40)
+        self.drive_button.pack(side="left")
+        button(row, "↻ " + _("Обновить"), self.refresh_drive, "ghost", width=110).pack(side="left", padx=8)
+
+        options = Card(page, _("Настройки синхронизации"))
+        options.pack(fill="x", pady=(0, 14))
+        self.var_drive_folder = tk.StringVar(value=drive["folder"])
+        self.field(options, _("Папка на Драйве"), self.var_drive_folder, _("В корне «Моего диска»; если её нет — создастся при первой синхронизации"))
+        saved = (collection.read_settings().get("drive") or {}).get("local", "")
+        self.var_drive_local = tk.StringVar(value=saved)
+        self.field(options, _("Папка на ПК"), self.var_drive_local, _("Пусто — Waifu из anime-paths.json коллекции"), browse="folder")
+        self.var_drive_auto = tk.BooleanVar(value=drive["auto"])
+        self.var_drive_interval = tk.StringVar(value=str(drive["interval"]))
+        row = ctk.CTkFrame(options, fg_color="transparent")
+        row.pack(fill="x", padx=18, pady=5)
+        ctk.CTkLabel(row, text="", width=170).pack(side="left")
+        ctk.CTkCheckBox(row, text=_("Синхронизировать сама каждые"), variable=self.var_drive_auto, font=font(13), text_color=TEXT,
+                        fg_color=ACCENT, hover_color=ACCENT_HOVER, border_color=LINE, checkbox_width=20, checkbox_height=20).pack(side="left")
+        ctk.CTkEntry(row, textvariable=self.var_drive_interval, width=60, height=32, fg_color=FIELD, border_color=LINE,
+                     corner_radius=9).pack(side="left", padx=8)
+        ctk.CTkLabel(row, text=_("мин, пока окно открыто"), font=font(13), text_color=TEXT).pack(side="left")
+        ctk.CTkLabel(options, text=_("Автосинк не спрашивает подтверждения, но останавливается, если удалений подозрительно много"),
+                     font=font(11), text_color=FAINT, anchor="w").pack(fill="x", padx=(206, 18))
+        bar = ctk.CTkFrame(options, fg_color="transparent")
+        bar.pack(fill="x", padx=18, pady=(10, 16))
+        button(bar, _("Сохранить"), self.save_drive, "primary", width=160).pack(side="left")
+        self.drive_note = ctk.CTkLabel(bar, text="", font=font(12), text_color=MUTED)
+        self.drive_note.pack(side="left", padx=12)
+        self.last_auto = 0.0
         return page
 
     def page_settings(self) -> ctk.CTkFrame:
@@ -510,6 +575,12 @@ class App(ctk.CTk):
                 self.show_duplicates(value)
             elif kind == "thumb":
                 self.set_thumb(*value)
+            elif kind == "drive":
+                self.show_drive(value)
+            elif kind == "drive_refresh":
+                self.refresh_drive()
+            elif kind == "say":
+                self.say(*value)
         while True:
             try:
                 event = self.runner.events.get_nowait()
@@ -649,6 +720,124 @@ class App(ctk.CTk):
             folder = self.snapshot.root / collection.DUPLICATES
             os.startfile(str(folder if folder.exists() else self.snapshot.root))  # noqa: S606 — открыть папку в проводнике
 
+    # ================================================================ драйв
+
+    def drive_root(self) -> Path | None:
+        return self.snapshot.root if self.snapshot and not self.snapshot.error else collection.find_root()
+
+    def refresh_drive(self) -> None:
+        """Аккаунт, место, папка на ПК, последняя синхронизация — в фоне (сеть и обход 40 тысяч файлов)."""
+        root = self.drive_root()
+
+        def work() -> None:
+            info = {"status": gdrive.status(), "state": drive_sync.load_state().get("last") or {}}
+            if root is not None:
+                local = drive_sync.local_root(root)
+                count = size = 0
+                for current, _dirs, names in os.walk(local):
+                    for name in names:
+                        if not drive_sync.skip(name):
+                            count += 1
+                            try:
+                                size += os.path.getsize(os.path.join(current, name))
+                            except OSError:
+                                pass
+                info.update(local=str(local), count=count, size=size, exists=local.is_dir())
+            self.results.put(("drive", info))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def show_drive(self, info: dict) -> None:
+        status = info["status"]
+        signed = "email" in status
+        if not status.get("client"):
+            self.drive_account.configure(text=_("Нет OAuth-клиента Google — выбери его JSON-файл («Файл OAuth-клиента…»)"), text_color=YELLOW)
+        elif status.get("error"):
+            self.drive_account.configure(text=_("Драйв не отвечает: {error}").format(error=status["error"][:200]), text_color=RED)
+        elif signed:
+            self.drive_account.configure(text=_("Вход выполнен: {email}").format(email=status["email"]), text_color=GREEN)
+        else:
+            self.drive_account.configure(text=_("Вход не выполнен"), text_color=MUTED)
+        if signed:
+            free = status["limit"] - status["used"] if status["limit"] else 0
+            self.drive_quota.configure(text=_("Место: занято {used} из {limit} — свободно {free}").format(
+                used=drive_sync.gigabytes(status["used"]), limit=drive_sync.gigabytes(status["limit"]), free=drive_sync.gigabytes(free))
+                if status["limit"] else _("Место: без ограничения"))
+        else:
+            self.drive_quota.configure(text=_("Войди в аккаунт, на чей Драйв синхронизировать (откроется браузер)"))
+        self.drive_login.configure(text=_("Сменить аккаунт") if signed else _("Войти в Google"),
+                                   state="normal" if status.get("client") else "disabled")
+        if signed:
+            self.drive_logout.pack(side="left", padx=8, after=self.drive_login)
+        else:
+            self.drive_logout.pack_forget()
+        if "local" in info:
+            text = _("Папка на ПК: {path} — {count} файлов, {size}").format(
+                path=info["local"], count=number(info["count"]), size=drive_sync.gigabytes(info["size"])) if info["exists"] \
+                else _("Папки на ПК нет: {path}").format(path=info["local"])
+            self.drive_info.configure(text=text + "\n" + _("Папка на Драйве: «{folder}»").format(folder=drive_sync.settings()["folder"]))
+        last = info["state"]
+        self.drive_last.configure(text=_("Последняя синхронизация: {time} — на Драйв {uploaded}, на ПК {downloaded}, в корзины {deleted}, ошибок {errors}").format(**last)
+                                  if last else _("Синхронизаций ещё не было"))
+        self.drive_button.configure(state="normal" if signed and not self.runner.busy else "disabled")
+
+    def drive_sign_in(self) -> None:
+        self.drive_account.configure(text=_("Открыл браузер — выбери аккаунт Google и разреши доступ к Драйву…"), text_color=YELLOW)
+
+        def work() -> None:
+            try:
+                gdrive.logout()
+                email = gdrive.login()
+                self.results.put(("say", (_("Вход в Google: {email}").format(email=email), "92")))
+            except Exception as exc:
+                self.results.put(("say", (_("Вход не удался: {error}").format(error=getattr(exc, "what", exc)), "91")))
+            self.results.put(("drive_refresh", None))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def drive_sign_out(self) -> None:
+        gdrive.logout()
+        self.refresh_drive()
+
+    def drive_pick_client(self) -> None:
+        path = filedialog.askopenfilename(parent=self, filetypes=[("JSON", "*.json")])
+        if path:
+            import shutil
+
+            shutil.copy(path, gdrive.CLIENT)
+            self.refresh_drive()
+
+    def save_drive(self) -> None:
+        try:
+            interval = int(self.var_drive_interval.get())
+            if interval < 5:
+                raise ValueError
+        except ValueError:
+            self.drive_note.configure(text=_("Интервал — целое число минут, не меньше 5."), text_color=RED)
+            return
+        local = self.var_drive_local.get().strip()
+        if local and not Path(local).is_dir():
+            self.drive_note.configure(text=_("Нет такой папки: {path}").format(path=local), text_color=RED)
+            return
+        data = collection.read_settings()
+        data["drive"] = {"folder": self.var_drive_folder.get().strip() or "Waifu", "local": local.replace("\\", "/"),
+                         "auto": bool(self.var_drive_auto.get()), "interval": interval}
+        collection.save_settings(data)
+        self.drive_note.configure(text=_("Сохранено в config.json."), text_color=GREEN)
+        self.refresh_drive()
+
+    def start_sync(self, auto: bool = False) -> None:
+        self.start(_("Синхронизация"), "sync", ("--yes",) if auto else ())
+
+    def poll_auto_sync(self) -> None:
+        """Автосинк: раз в минуту проверить, пора ли (включено, вход есть, ничего не идёт)."""
+        settings = drive_sync.settings()
+        if settings["auto"] and not self.runner.busy and time.time() - self.last_auto >= settings["interval"] * 60 \
+                and gdrive.TOKEN.exists():
+            self.last_auto = time.time()
+            self.start_sync(auto=True)
+        self.after(60_000, self.poll_auto_sync)
+
     # ================================================================ команды
 
     def start_download(self) -> None:
@@ -657,7 +846,7 @@ class App(ctk.CTk):
     def start_distribute(self) -> None:
         self.start(_("Раскладка"), "distribute")
 
-    def start(self, title: str, command: str) -> None:
+    def start(self, title: str, command: str, extra: tuple[str, ...] = ()) -> None:
         if self.runner.busy:
             self.say(_("Уже идёт другая команда — дождись её или останови."), "93")
             return
@@ -666,14 +855,14 @@ class App(ctk.CTk):
             self.say(_("Коллекция не найдена — укажи папку в «Настройках»."), "91")
             return
         self.clear_log()
-        self.runner.start(title, command, root)
+        self.runner.start(title, command, root, extra)
         self.set_running(True, title)
 
     def set_running(self, running: bool, title: str = "") -> None:
         self.foot_state.configure(text="● " + (_("Идёт: {title}").format(title=title) if running else _("Команда не идёт")),
                                   text_color=ACCENT if running else MUTED)
         self.log_title.configure(text=(_("Журнал") + (f" — {title}" if running else "")).upper())
-        for widget in (self.download_button, self.distribute_button):
+        for widget in (self.download_button, self.distribute_button, self.drive_button):
             widget.configure(state="disabled" if running else "normal")
         if running:
             self.stop_button.pack(side="right", padx=(8, 0))
@@ -697,6 +886,8 @@ class App(ctk.CTk):
                          "92" if event[1] == 0 else "91")])
             self.set_running(False)
             self.refresh()
+            if self.current == "drive":
+                self.refresh_drive()
 
     def ask(self, prompt: str, options) -> None:
         self.clear_question()

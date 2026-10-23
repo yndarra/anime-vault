@@ -31,6 +31,11 @@ to the program.
   (`data82: 500, data83: 500, data84: 213`). Distribution can be switched off if you only want downloads.
 - **Duplicates page.** Every duplicate is shown next to the file it duplicates, with *Show original* and *To Recycle Bin*
   (single or all). Nothing is ever deleted permanently.
+- **Two-way Google Drive sync.** The Drive page keeps a local folder (the sorted `Waifu` collection by default) and a
+  Drive folder in sync both ways: new files are copied, deletions go to the Recycle Bin / Drive trash, moves are
+  detected by MD5 instead of re-uploading, and folders renumbered by anime-sort (`102. Title` → `103. Title`) are just
+  renamed. A three-way comparison with the last synced state tells which side changed; a plan is shown before anything
+  happens, mass deletions stop auto sync, and an interrupted sync resumes. Optional auto sync while the window is open.
 - **Friendly errors.** Locked or encrypted cookies, a private board, HTTP 429, an unsupported URL — each comes with
   a "what to do" hint. Interrupted runs resume where they stopped.
 
@@ -54,7 +59,9 @@ venv\Scripts\pip install -r requirements.txt
 venv\Scripts\pythonw -m anime_vault
 ```
 
-Settings live in `config.json` (created by the Settings page; `config.example.json` shows the format). For anime-sort,
+Settings live in `config.json` (created by the Settings page; `config.example.json` shows the format). Drive sync needs
+a Google OAuth client of type *Desktop app* (Google Cloud Console → APIs & Services → Credentials, with the Drive API
+enabled): choose its JSON on the Drive page, then *Sign in to Google*. For anime-sort,
 put `anime-paths.json` (see `anime-paths.example.json`) into the collection folder; without it the collection uses
 `dataN` for batches and the board folders as sources. Copies of `launchers/anime-vault.bat` named `download.bat` and
 `distribute.bat` run the commands from the collection folder.
@@ -78,6 +85,7 @@ with the same placeholders. CI runs them on `windows-latest`; pushing a `v*` tag
 | `anime_vault/known.py` | what is already in the collection: keys by file name, SHA-1 with cache |
 | `anime_vault/download.py` | gallery-dl runs, metadata embedding, error explanations |
 | `anime_vault/distribute.py` | distribution into `dataN` with a journal |
+| `anime_vault/gdrive.py`, `drive_sync.py` | Google sign-in; two-way folder sync (scan, plan, parallel transfers) |
 | `anime_vault/browsers.py` | cookie sources and the "is the browser running" check |
 | `anime_vault/i18n.py`, `en.py` | Russian / English UI |
 | `anime_vault/gui/` | the window: pages, subprocess runner, collection stats and duplicates |

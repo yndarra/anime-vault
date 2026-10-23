@@ -69,7 +69,7 @@ class Runner:
     def busy(self) -> bool:
         return self.process is not None and self.process.poll() is None
 
-    def start(self, title: str, command: str, root: Path) -> None:
+    def start(self, title: str, command: str, root: Path, extra: tuple[str, ...] = ()) -> None:
         if self.busy:
             raise RuntimeError(_("уже идёт другая команда"))
         self.title = title
@@ -77,7 +77,7 @@ class Runner:
                    PYTHONUNBUFFERED="1", PYTHONPATH=str(PROJECT))
         # Собранный .exe запускает сам себя с командой (anime_vault\__main__.py), исходники — python -m anime_vault.
         program = [sys.executable] if FROZEN else [python_exe(), "-m", "anime_vault"]
-        self.process = subprocess.Popen([*program, command, "--root", str(root)],
+        self.process = subprocess.Popen([*program, command, "--root", str(root), *extra],
                                         cwd=str(PROJECT), env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                         stderr=subprocess.STDOUT, creationflags=NO_WINDOW)
         threading.Thread(target=self.read, args=(self.process,), daemon=True).start()
