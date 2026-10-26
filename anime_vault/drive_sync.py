@@ -394,8 +394,15 @@ class Syncer:
                     last = now
                     speed = moved / max(now - started, 1)
                     left = (total_bytes - moved) / speed if speed else 0
-                    text = _("{done} / {total} файлов · {moved} / {size} · осталось ~{left}") if pending else _("{done} / {total} файлов · {moved} / {size}")
-                    console.info("  " + text.format(done=count, total=len(jobs), moved=gigabytes(moved), size=gigabytes(total_bytes), left=duration(left)))
+                    percent = int(100 * moved / total_bytes) if total_bytes else 100
+                    # Одна строка — всё, что нужно понять: сколько уже, сколько осталось, скорость и сбои
+                    text = _("{percent}% · готово {done} из {total} файлов ({moved} из {size}) · осталось {rest} файлов, ~{left} · {speed}/с") \
+                        if pending else _("{percent}% · готово {done} из {total} файлов ({moved} из {size})")
+                    if self.errors:
+                        text += " · " + _("сбоев: {errors}").format(errors=len(self.errors))
+                    console.info("  " + text.format(percent=percent, done=count, total=len(jobs), moved=gigabytes(moved),
+                                                    size=gigabytes(total_bytes), rest=len(jobs) - count, left=duration(left),
+                                                    speed=gigabytes(int(speed)), errors=len(self.errors)))
         self.save()
 
 
@@ -468,6 +475,8 @@ def run(collection: Path, yes: bool = False) -> int:
             (_("В корзину Драйва (удалены на ПК)"), len(plan.trash_remote), 0, console.YELLOW),
             (_("В Корзину на ПК (удалены на Драйве)"), len(plan.trash_local), 0, console.YELLOW),
             (_("Переименовать папки на Драйве"), len(renames), 0, "")]
+    if plan.link:                               # после прерванной заливки — сколько уже на месте
+        console.say("  " + _("Уже есть с обеих сторон: {count}").format(count=len(plan.link)))
     for title, count, size, color in rows:
         if count:
             console.say(f"  {title}: {count}" + (f" ({gigabytes(size)})" if size else ""), color)
@@ -532,6 +541,19 @@ def run(collection: Path, yes: bool = False) -> int:
     jobs = [(syncer.download, (theirs, conflict_name(mine.path), file_key(conflict_name(mine.path).split("/"))), theirs.size)
             for mine, theirs in plan.conflict]
     syncer.run_parallel(jobs, sum(t.size for _m, t in plan.conflict), _("Сохраняю версии с Драйва, изменённые с обеих сторон…"))
+    # Сначала все недостающие папки на Драйве (по одной — их могут быть тысячи, поэтому с прогрессом).
+    needed = {mine.path.rpartition("/")[0] for mine, file_id in plan.upload if not file_id}
+    missing = {folder_key(path.split("/")[:index + 1]) for path in needed if path
+               for index in range(path.count("/") + 1)} - set(syncer.remote_folders)
+    if missing:
+        console.step(_("Создаю папки на Драйве: {count}…").format(count=len(missing)))
+        last, before = time.time(), len(syncer.remote_folders)
+        for path in sorted(needed):
+            syncer.remote_folder(path)
+            if time.time() - last > 5:
+                last = time.time()
+                console.info("  " + _("папок {done} из {total}").format(done=len(syncer.remote_folders) - before, total=len(missing)))
+        console.info("  " + _("папок {done} из {total}").format(done=len(syncer.remote_folders) - before, total=len(missing)))
     jobs = []
     for mine, file_id in plan.upload:
         parent = "" if file_id else syncer.remote_folder(mine.path.rpartition("/")[0])
