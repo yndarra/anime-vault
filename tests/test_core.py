@@ -48,6 +48,7 @@ def touch(path: Path, data: bytes, mtime: int) -> None:
 def test_pin_key():
     assert pin_key("pinterest_911697518295594812.jpg") == "911697518295594812"
     assert pin_key("pinterest_9116975_2ac9f0.png") == "9116975_2ac9f0"
+    assert pin_key("pinterest_AUzDQDil_yHMVNLh-Wt_Q.png") == "AUzDQDil_yHMVNLh-Wt_Q"   # буквенный id пина
     assert pin_key("Screenshot 2026.png") is None
 
 
@@ -85,6 +86,15 @@ def test_distribute_moves_new_files_and_skips_duplicates(collection, monkeypatch
     assert (collection / "data" / "pins" / "02. Keep" / "pinterest_9.jpg").exists()   # «только хранить» не тронута
     journal = json.loads(next(manifest.LOGS.glob("distribute_*.json")).read_text(encoding="utf-8"))
     assert list(journal["batches"]) == ["data8", "data9"]
+    # Пара «дубль → оригинал»: оригинал скриншота уехал в data9 — в журнале его новое место.
+    originals = {Path(item["file"]).name: Path(item["original"]) for item in journal["duplicates"]}
+    assert originals["01. Main__pinterest_1.jpg"] == collection / "dataN" / "data7" / "pinterest_1.jpg"
+    assert originals["add__copy.png"] == collection / "dataN" / "data9" / "shot.png"
+    from anime_vault.gui import collection as gui_collection
+
+    monkeypatch.setattr(gui_collection, "LOGS", manifest.LOGS)
+    found = gui_collection.duplicates(collection)
+    assert sorted(Path(d.original).name for d in found) == ["pinterest_1.jpg", "shot.png"]
 
 
 def test_distribute_cancel_moves_nothing(collection, monkeypatch):
