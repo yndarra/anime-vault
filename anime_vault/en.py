@@ -247,8 +247,13 @@ EN = {
 
     # ---- Google Drive: синхронизация
     "сбой: {error}": "failed: {error}",
-    "{done} / {total} файлов · {moved} / {size} · осталось ~{left}": "{done} / {total} files · {moved} / {size} · ~{left} left",
-    "{done} / {total} файлов · {moved} / {size}": "{done} / {total} files · {moved} / {size}",
+    "{percent}% · готово {done} из {total} файлов ({moved} из {size}) · осталось {rest} файлов, ~{left} · {speed}/с":
+        "{percent}% · {done} of {total} files done ({moved} of {size}) · {rest} files left, ~{left} · {speed}/s",
+    "{percent}% · готово {done} из {total} файлов ({moved} из {size})": "{percent}% · {done} of {total} files done ({moved} of {size})",
+    "сбоев: {errors}": "failures: {errors}",
+    "Создаю папки на Драйве: {count}…": "Creating folders on Drive: {count}…",
+    "папок {done} из {total}": "{done} of {total} folders",
+    "Уже есть с обеих сторон: {count}": "Already on both sides: {count}",
     "{value} ГБ": "{value} GB",
     "{value} МБ": "{value} MB",
     "{hours} ч {minutes} мин": "{hours} h {minutes} min",
