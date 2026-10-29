@@ -19,14 +19,13 @@ import queue
 import subprocess
 import sys
 import threading
-import time
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
-from anime_vault import browsers, drive_sync, gdrive, i18n, manifest
+from anime_vault import agent, browsers, drive_sync, gdrive, i18n, manifest
 from anime_vault.gui import collection
 from anime_vault.gui.runner import Runner, python_exe
 from anime_vault.i18n import _
@@ -129,7 +128,6 @@ class App(ctk.CTk):
         self.refresh()
         self.after(100, self.poll)
         self.after(500, self.poll_browser)
-        self.after(15_000, self.poll_auto_sync)
 
     # ================================================================ каркас
 
@@ -364,24 +362,31 @@ class App(ctk.CTk):
         saved = (collection.read_settings().get("drive") or {}).get("local", "")
         self.var_drive_local = tk.StringVar(value=saved)
         self.field(options, _("Папка на ПК"), self.var_drive_local, _("Пусто — Waifu из anime-paths.json коллекции"), browse="folder")
-        self.var_drive_auto = tk.BooleanVar(value=drive["auto"])
+        # Фон — отдельный лёгкий процесс со значком в трее (anime_vault\agent.py), запускается вместе с Windows.
+        self.var_drive_background = tk.BooleanVar(value=drive["background"])
         self.var_drive_interval = tk.StringVar(value=str(drive["interval"]))
         row = ctk.CTkFrame(options, fg_color="transparent")
         row.pack(fill="x", padx=18, pady=5)
         ctk.CTkLabel(row, text="", width=170).pack(side="left")
-        ctk.CTkCheckBox(row, text=_("Синхронизировать сама каждые"), variable=self.var_drive_auto, font=font(13), text_color=TEXT,
-                        fg_color=ACCENT, hover_color=ACCENT_HOVER, border_color=LINE, checkbox_width=20, checkbox_height=20).pack(side="left")
+        ctk.CTkCheckBox(row, text=_("Синхронизировать в фоне — значок в трее, запуск вместе с Windows"),
+                        variable=self.var_drive_background, font=font(13), text_color=TEXT, fg_color=ACCENT,
+                        hover_color=ACCENT_HOVER, border_color=LINE, checkbox_width=20, checkbox_height=20).pack(side="left")
+        row = ctk.CTkFrame(options, fg_color="transparent")
+        row.pack(fill="x", padx=18, pady=5)
+        ctk.CTkLabel(row, text=_("Проверять Драйв"), width=170, anchor="w", font=font(13), text_color=MUTED).pack(side="left")
+        ctk.CTkLabel(row, text=_("каждые"), font=font(13), text_color=TEXT).pack(side="left")
         ctk.CTkEntry(row, textvariable=self.var_drive_interval, width=60, height=32, fg_color=FIELD, border_color=LINE,
                      corner_radius=9).pack(side="left", padx=8)
-        ctk.CTkLabel(row, text=_("мин, пока окно открыто"), font=font(13), text_color=TEXT).pack(side="left")
-        ctk.CTkLabel(options, text=_("Автосинк не спрашивает подтверждения, но останавливается, если удалений подозрительно много"),
-                     font=font(11), text_color=FAINT, anchor="w").pack(fill="x", padx=(206, 18))
+        ctk.CTkLabel(row, text=_("мин"), font=font(13), text_color=TEXT).pack(side="left")
+        ctk.CTkLabel(options, text=_("Папку на ПК Windows отслеживает сама — изменения замечаются сразу; у Драйва раз в N минут "
+                                     "спрашивается один короткий список изменений. Полная сверка — только когда что-то изменилось. "
+                                     "Фон не спрашивает подтверждения, но останавливается, если удалений подозрительно много."),
+                     font=font(11), text_color=FAINT, anchor="w", justify="left", wraplength=760).pack(fill="x", padx=(206, 18))
         bar = ctk.CTkFrame(options, fg_color="transparent")
         bar.pack(fill="x", padx=18, pady=(10, 16))
         button(bar, _("Сохранить"), self.save_drive, "primary", width=160).pack(side="left")
         self.drive_note = ctk.CTkLabel(bar, text="", font=font(12), text_color=MUTED)
         self.drive_note.pack(side="left", padx=12)
-        self.last_auto = 0.0
         return page
 
     def page_settings(self) -> ctk.CTkFrame:
@@ -775,7 +780,9 @@ class App(ctk.CTk):
             text = _("Папка на ПК: {path} — {count} файлов, {size}").format(
                 path=info["local"], count=number(info["count"]), size=drive_sync.gigabytes(info["size"])) if info["exists"] \
                 else _("Папки на ПК нет: {path}").format(path=info["local"])
-            self.drive_info.configure(text=text + "\n" + _("Папка на Драйве: «{folder}»").format(folder=drive_sync.settings()["folder"]))
+            background = _("Фон: работает (значок в трее)") if agent.running() else _("Фон: выключен")
+            self.drive_info.configure(text=text + "\n" + _("Папка на Драйве: «{folder}»").format(folder=drive_sync.settings()["folder"])
+                                      + "\n" + background)
         last = info["state"]
         self.drive_last.configure(text=_("Последняя синхронизация: {time} — на Драйв {uploaded}, на ПК {downloaded}, в корзины {deleted}, ошибок {errors}").format(**last)
                                   if last else _("Синхронизаций ещё не было"))
@@ -810,10 +817,10 @@ class App(ctk.CTk):
     def save_drive(self) -> None:
         try:
             interval = int(self.var_drive_interval.get())
-            if interval < 5:
+            if interval < 1:
                 raise ValueError
         except ValueError:
-            self.drive_note.configure(text=_("Интервал — целое число минут, не меньше 5."), text_color=RED)
+            self.drive_note.configure(text=_("Интервал — целое число минут, не меньше 1."), text_color=RED)
             return
         local = self.var_drive_local.get().strip()
         if local and not Path(local).is_dir():
@@ -821,22 +828,25 @@ class App(ctk.CTk):
             return
         data = collection.read_settings()
         data["drive"] = {"folder": self.var_drive_folder.get().strip() or "Waifu", "local": local.replace("\\", "/"),
-                         "auto": bool(self.var_drive_auto.get()), "interval": interval}
+                         "background": bool(self.var_drive_background.get()), "interval": interval}
         collection.save_settings(data)
+        # Фон: включён — в «Автозагрузку» и запустить сейчас; выключен — убрать и закрыть.
+        background = data["drive"]["background"]
+        try:
+            agent.set_autostart(background)
+            if background:
+                agent.start()
+            else:
+                agent.stop()
+        except OSError as exc:
+            self.drive_note.configure(text=_("Не получилось настроить фон: {error}").format(error=exc), text_color=RED)
+            return
         self.drive_note.configure(text=_("Сохранено в config.json."), text_color=GREEN)
+        self.after(1500, self.refresh_drive)
         self.refresh_drive()
 
-    def start_sync(self, auto: bool = False) -> None:
-        self.start(_("Синхронизация"), "sync", ("--yes",) if auto else ())
-
-    def poll_auto_sync(self) -> None:
-        """Автосинк: раз в минуту проверить, пора ли (включено, вход есть, ничего не идёт)."""
-        settings = drive_sync.settings()
-        if settings["auto"] and not self.runner.busy and time.time() - self.last_auto >= settings["interval"] * 60 \
-                and gdrive.TOKEN.exists():
-            self.last_auto = time.time()
-            self.start_sync(auto=True)
-        self.after(60_000, self.poll_auto_sync)
+    def start_sync(self) -> None:
+        self.start(_("Синхронизация"), "sync")
 
     # ================================================================ команды
 

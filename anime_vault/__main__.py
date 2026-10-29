@@ -5,6 +5,7 @@ r"""python -m anime_vault [<команда>] [--root <папка коллекц�
     distribute   разложить новое из источников (anime-paths.json → sources) по dataN пачками по batch_size
     sync         синхронизировать Waifu с Google Drive в обе стороны (--yes — без вопроса, для автосинка)
     (без команды) открыть окно anime-vault
+    --agent      фоновая синхронизация с Драйвом: значок в трее (anime_vault\agent.py)
 Без --root корень ищется вверх от текущей папки (там, где лежит anime-paths.json), потом config.json → "collection".
 
 Собранный anime-vault.exe — та же точка входа: двойной щелчок открывает окно, окно запускает его же с командой,
@@ -30,6 +31,10 @@ def main() -> int:
     console.attach_std()
     if len(sys.argv) > 1 and sys.argv[1] == "--gallery-dl":
         return run_gallery_dl(sys.argv[2:])
+    if len(sys.argv) > 1 and sys.argv[1] == "--agent":       # фоновая синхронизация с Драйвом (значок в трее)
+        from anime_vault.agent import main as agent
+
+        return agent()
     if len(sys.argv) == 1 or sys.argv[1] == "--page":
         from anime_vault.gui.app import main as gui
 

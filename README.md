@@ -35,7 +35,11 @@ to the program.
   Drive folder in sync both ways: new files are copied, deletions go to the Recycle Bin / Drive trash, moves are
   detected by MD5 instead of re-uploading, and folders renumbered by anime-sort (`102. Title` → `103. Title`) are just
   renamed. A three-way comparison with the last synced state tells which side changed; a plan is shown before anything
-  happens, mass deletions stop auto sync, and an interrupted sync resumes. Optional auto sync while the window is open.
+  happens, mass deletions stop auto sync, and an interrupted sync resumes.
+- **Background sync from the tray.** A tiny tray agent (`anime_vault/agent.py`, standard library only, ~25 MB, zero CPU
+  while idle) starts with Windows: the OS wakes it on local folder changes (`FindFirstChangeNotification`), Drive's
+  change feed is checked every few minutes with one small request, and a full sync runs only when something inside the
+  folder changed. One Windows notification per batch: added / deleted on each side, non-zero lines only.
 - **Friendly errors.** Locked or encrypted cookies, a private board, HTTP 429, an unsupported URL — each comes with
   a "what to do" hint. Interrupted runs resume where they stopped.
 
@@ -86,6 +90,7 @@ with the same placeholders. CI runs them on `windows-latest`; pushing a `v*` tag
 | `anime_vault/download.py` | gallery-dl runs, metadata embedding, error explanations |
 | `anime_vault/distribute.py` | distribution into `dataN` with a journal |
 | `anime_vault/gdrive.py`, `drive_sync.py` | Google sign-in; two-way folder sync (scan, plan, parallel transfers) |
+| `anime_vault/agent.py` | background sync: tray icon, folder watcher, Drive change feed, notifications |
 | `anime_vault/browsers.py` | cookie sources and the "is the browser running" check |
 | `anime_vault/i18n.py`, `en.py` | Russian / English UI |
 | `anime_vault/gui/` | the window: pages, subprocess runner, collection stats and duplicates |

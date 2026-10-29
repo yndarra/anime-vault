@@ -38,6 +38,10 @@ from anime_vault.i18n import _
 from anime_vault.paths import PROJECT
 
 STATE = PROJECT / "cache" / "drive_state.json"
+# Маленькие файлы для фоновой синхронизации (anime_vault\agent.py) — чтобы не читать большой drive_state.json:
+LAST = PROJECT / "cache" / "drive_last.json"         # итог последнего запуска (что сделано / почему остановлен)
+FOLDERS = PROJECT / "cache" / "drive_folders.json"   # id папок Waifu на Драйве — по ним видно, что изменения «наши»
+LOCK = PROJECT / "cache" / "drive_sync.lock"         # занят — значит, синхронизация уже идёт (окно или фон)
 NUMBER_RE = re.compile(r"^\d+\.\s+")
 IGNORED = {"desktop.ini", "thumbs.db", ".ds_store"}
 WORKERS = 6
@@ -120,7 +124,31 @@ def settings() -> dict:
         data = json.loads(SETTINGS.read_text(encoding="utf-8")).get("drive") or {}
     except (OSError, ValueError):
         data = {}
-    return {"folder": data.get("folder") or "Waifu", "auto": bool(data.get("auto")), "interval": int(data.get("interval") or 30)}
+    # background — фоновая синхронизация (значок в трее, запуск с Windows); interval — раз во сколько минут
+    # спрашивать у Драйва, было ли что-то новое (один маленький запрос; полная сверка — только если было)
+    return {"folder": data.get("folder") or "Waifu", "background": bool(data.get("background")),
+            "interval": max(1, int(data.get("interval") or 5))}
+
+
+def try_lock():
+    """Занять замок синхронизации → открытый файл (держать, пока идёт синхронизация) или None, если уже занят."""
+    import msvcrt
+
+    LOCK.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(LOCK, "a+")
+    try:
+        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+    except OSError:
+        handle.close()
+        return None
+    return handle
+
+
+def write_small(path: Path, data) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_suffix(".tmp")
+    temp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    os.replace(temp, path)
 
 
 def scan_local(root: Path) -> tuple[dict[str, Item], dict[str, str]]:
@@ -441,6 +469,9 @@ def run(collection: Path, yes: bool = False) -> int:
     root = local_root(collection)
     folder_name = settings()["folder"]
     console.title(_("Синхронизация {local} ⇄ Google Drive «{folder}»").format(local=root.name, folder=folder_name))
+    lock = try_lock()      # держится до конца run: вторая синхронизация (окно + фон) не начнётся
+    if lock is None:
+        raise UserError(_("синхронизация уже идёт (в окне anime-vault или в фоне)"), _("дождитесь её конца"))
     if not root.is_dir():
         raise UserError(_("нет папки {path}").format(path=root), _("укажите папку в «Настройках» (Драйв → папка на ПК)"))
     account = gdrive.account()
@@ -484,7 +515,8 @@ def run(collection: Path, yes: bool = False) -> int:
         for mine, theirs in plan.link:          # одинаковые с обеих сторон / сменился только путь — запомнить
             base[mine.key] = {"path": mine.path, "size": mine.size, "mtime": mine.mtime, "md5": theirs.md5, "id": theirs.id}
         state["folders"] = sorted(set(local_folders) & set(remote_folders))
-        finish(state, {"uploaded": 0, "downloaded": 0, "deleted": 0, "errors": 0})
+        finish(state, {"uploaded": 0, "downloaded": 0, "deleted": 0, "errors": 0},
+               [root_id, *(folder_id for folder_id, _path in remote_folders.values())] if root_id else None)
         console.ok(_("Всё совпадает — синхронизировать нечего."))
         return 0
     if account["limit"] and up_bytes > account["limit"] - account["used"]:
@@ -495,6 +527,7 @@ def run(collection: Path, yes: bool = False) -> int:
     if many:
         console.warn(_("Удалений много: {count}. Проверьте, что папка на ПК и на Драйве те, что нужно.").format(count=plan.deletions))
         if yes:
+            write_small(LAST, {"run": time.time(), "time": time.strftime("%Y-%m-%d %H:%M"), "blocked": plan.deletions})
             console.error(_("автосинхронизация остановлена из-за большого числа удалений"), _("запустите синхронизацию вручную и проверьте план"))
             return 1
     if not yes and console.ask(_("Синхронизировать?"), "дн") != "д":
@@ -585,9 +618,13 @@ def run(collection: Path, yes: bool = False) -> int:
     cleanup_folders(root, syncer, local_folders, remote_folders)
     syncer.save()
 
+    # Итог — и для окна (uploaded/downloaded/deleted), и для уведомления фона (added_*/deleted_*/moved).
     summary = {"uploaded": len(plan.upload) + len(plan.conflict), "downloaded": len(plan.download) + len(plan.conflict),
-               "deleted": plan.deletions, "errors": len(syncer.errors)}
-    finish(state, summary)
+               "deleted": plan.deletions, "errors": len(syncer.errors),
+               "added_pc": len(plan.download) + len(plan.conflict), "added_drive": len(plan.upload) + len(plan.conflict),
+               "deleted_pc": len(plan.trash_local), "deleted_drive": len(plan.trash_remote),
+               "moved": len(plan.move_remote) + len(plan.move_local) + len(renames)}
+    finish(state, summary, [root_id, *(folder_id for folder_id, _path in syncer.remote_folders.values())])
     if syncer.errors:
         console.warn(_("Готово с ошибками: {count}. Запустите синхронизацию ещё раз — несделанное повторится.").format(count=len(syncer.errors)))
         return 1
@@ -623,6 +660,9 @@ def cleanup_folders(root: Path, syncer: Syncer, local_folders: dict, remote_fold
     syncer.state["folders"] = sorted((set(syncer.local_folders) & set(syncer.remote_folders)) - removed)
 
 
-def finish(state: dict, summary: dict) -> None:
+def finish(state: dict, summary: dict, folder_ids=None) -> None:
     state["last"] = {"time": time.strftime("%Y-%m-%d %H:%M"), **summary}
     save_state(state)
+    write_small(LAST, {"run": time.time(), **state["last"]})
+    if folder_ids is not None:
+        write_small(FOLDERS, sorted(set(folder_ids)))
